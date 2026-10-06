@@ -1,0 +1,15 @@
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    dependencies:
+      '@acme/widgets':
+        specifier: ^2.0.0
+        version: 2.0.0
+
+packages:
+
+  /@acme/widgets@2.0.0:
+    resolution: {integrity: sha512-fakefixtureintegrity==}
+    dev: false

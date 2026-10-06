@@ -1,0 +1,7 @@
+{
+  "_meta": { "pipversion": "*" },
+  "default": {
+    "acme-lib": { "_hash": "", "version": "==1.2.3" }
+  },
+  "develop": {}
+}

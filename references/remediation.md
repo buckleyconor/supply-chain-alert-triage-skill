@@ -9,8 +9,11 @@ scan actually found. Distinguish clearly between the two evidence levels:
   module **load time** (`require()`), not at install, exposure depends on whether
   the module was actually loaded by a build or dev run. Treat as suspect and
   remediate the dependency, but full-blown credential rotation is precautionary.
-- **Host IOC hit** (dropped `sync.js`, matching hash, rogue process, or live C2
-  connection): *active infection*. Assume the machine and every credential on it
+- **Host IOC hit** (dropped `sync.js`, matching hash, rogue process, live C2
+  connection, or a `persistence_matches` entry in `host_report.json` referencing
+  IOC paths/patterns): *active infection* — a persistence-only hit means the
+  infection is dormant or survives reboot, which is still compromise, not
+  history. Assume the machine and every credential on it
   is compromised. Do the full rotation immediately.
 
 ## If a compromised package version was found
@@ -39,8 +42,10 @@ scan actually found. Distinguish clearly between the two evidence levels:
 3. Terminate the detached malware process and remove the dropped payload
    (`sync.js` and its drop directory). **The user performs these destructive
    steps themselves** — provide the exact paths/PIDs found, do not run them.
-4. Check for persistence: cron entries, systemd user units, shell rc files, and
-   anything auto-launching the drop path.
+4. Check for persistence: start with `persistence_matches` in `host_report.json`
+   — it greps user crontabs, `/etc/cron*`, systemd user/system units, autostart
+   entries, and shell rc files for IOC paths and patterns (report-only). Confirm
+   each match is the malware and not a lookalike; removal is the user's action.
 5. Because this family includes an **AI-tool poisoning** module (Claude Code,
    Copilot, Cursor), audit the agentic/dev-assistant config and any MCP or agent
    credentials on the box, and rotate those too.

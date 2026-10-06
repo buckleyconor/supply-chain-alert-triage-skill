@@ -53,6 +53,16 @@ carefully, because everything downstream keys off it.
 - `network` — plain IPs or domain substrings matched against active connections
   (`ss`/`netstat`). Do not include `hxxp`/`[.]` defanging — convert to real form.
 
+## Validation
+
+The scanners enforce this schema. `scan_packages.py` exits **2** on malformed
+JSON, a missing/empty `packages` list, an ecosystem outside `npm`/`pypi`/`cargo`,
+or a missing `name` — fix `iocs.json` and re-run rather than trusting a partial
+scan. `scan_host_iocs.py` exits 2 on a malformed `host_iocs` block, and skips
+non-SHA-256 hash keys with a warning recorded in the report (`ioc_warnings`).
+PyPI names are matched case- and separator-insensitively (PEP 503), so `-`/`_`
+variants cannot cause a miss.
+
 ## Extraction guidance
 
 - Capture EVERY affected version listed, including alpha/beta/rc tags. Missing one

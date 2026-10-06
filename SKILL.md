@@ -11,6 +11,11 @@ description: >
   it identifies affected lockfiles and host indicators of compromise and
   produces a remediation checklist; it does not modify dependencies, delete
   files, or kill processes.
+license: MIT
+metadata:
+  author: Conor Buckley
+  version: "1.1.0"
+  repository: https://github.com/buckleyconor/supply-chain-alert-triage-skill
 ---
 
 # Supply Chain Alert Triage
@@ -53,7 +58,13 @@ Point `--roots` at the directories that hold the user's projects (e.g.
 `~/dev ~/projects`), or `~/` for a broad sweep. Scans `package-lock.json`,
 `yarn.lock`, `pnpm-lock.yaml`, and `node_modules` (npm); `requirements*.txt`,
 `poetry.lock`, `Pipfile.lock`, `uv.lock`, and installed `dist-info`/`egg-info` (PyPI); and
-`Cargo.lock` (Cargo). Reports exact `name@version` matches with file paths.
+`Cargo.lock` (Cargo). Reports exact `name@version` matches with file paths —
+PyPI names are matched with PEP 503 normalization, so `-`/`_`/`.` variants
+cannot slip through. Exit 2 means the `iocs.json` is invalid: fix it and
+re-run, don't trust a partial scan. Every report carries a `coverage` block
+(roots walked/skipped, per-ecosystem file counts, read errors, `confidence`):
+never report "clean" without checking it — `confidence: check` or a zero
+scan count for an IOC ecosystem means the scan never actually looked there.
 
 ### Step 3 — Scan host for active-infection IOCs
 
@@ -62,8 +73,13 @@ python3 scripts/scan_host_iocs.py --iocs iocs.json --out host_report.json
 ```
 
 Checks malware drop paths, SHA-256 matches under the cache dirs named in
-`iocs.json`, suspicious running processes, and active connections to known C2
-indicators. A hit here means likely **active infection**, not just exposure.
+`iocs.json`, suspicious running processes, active connections to known C2
+indicators, and persistence locations (user/system cron, systemd units,
+autostart `.desktop`, shell rc files) grepped for IOC paths and patterns — a
+report-only inert grep. A hit in the first four classes means likely **active
+infection**, not just exposure. `persistence_matches` is a weaker but still
+serious signal: the infection was dormant or survives reboot — same
+remediation urgency; verify each match before dismissing it.
 
 ### Step 4 — Corroborate with established scanners
 
@@ -85,8 +101,9 @@ evidence levels explicitly (see `references/remediation.md`):
   module **load time** (`require()`/import), not at install, so exposure depends
   on whether the code was actually loaded. Remediate the dependency; rotation is
   precautionary.
-- **Host IOC hit** → *active infection*. Assume the box and all credentials on it
-  are compromised; do full rotation.
+- **Host IOC hit** (live class, or a `persistence_matches` entry) → *active or
+  dormant infection*. Assume the box and all credentials on it are compromised;
+  do full rotation.
 
 Then present the tailored remediation checklist from `references/remediation.md`.
 Always: report confirmed hits to the security / Threat VM team, and flag that
@@ -99,6 +116,9 @@ out of scope for a single-station triage.
   version even without a host IOC.
 - **Transitive dependencies matter most.** Widely-used packages appear deep in
   the tree, so always scan resolved lockfiles, never just top-level manifests.
+- **"Zero hits" needs coverage before relief.** A clean-looking `packages_report.json`
+  with skipped roots, an unscanned IOC ecosystem, or `confidence: check` is
+  inconclusive, not clean — fix roots/IOCs and re-run.
 - **Do not "upgrade to latest" blindly.** In some campaigns the latest tag was
   itself the payload — pin to the specific safe version from the alert.
 - **AI-tooling is a target.** This family includes a module that poisons AI dev
@@ -108,7 +128,8 @@ out of scope for a single-station triage.
 ## Resources
 
 - `scripts/scan_packages.py` — npm/PyPI/Cargo lockfile + installed-package scanner.
-- `scripts/scan_host_iocs.py` — drop-file, hash, process, and C2-connection checks.
+- `scripts/scan_host_iocs.py` — drop-file, hash, process, C2-connection, and persistence checks.
 - `scripts/run_scanners.sh` — osv-scanner + npm audit corroboration wrapper.
 - `references/alert_parsing.md` — `iocs.json` schema and extraction rules. Read in Step 1.
 - `references/remediation.md` — evidence-level definitions and remediation checklist. Read in Step 5.
+- `tests/test_scanners.py` — stdlib-only self-tests: `python3 -m unittest discover -s tests -v` (CI runs these on every push).

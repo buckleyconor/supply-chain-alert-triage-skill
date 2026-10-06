@@ -1,0 +1,8 @@
+{
+  "alert_title": "Test fixture: ACME supply-chain compromise",
+  "packages": [
+    {"ecosystem": "npm", "name": "@ACME/widgets", "versions": ["2.0.0"]},
+    {"ecosystem": "pypi", "name": "acme_lib", "versions": ["1.2.3"]},
+    {"ecosystem": "cargo", "name": "acme-crate", "versions": []}
+  ]
+}

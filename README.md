@@ -67,8 +67,8 @@ Produced in Step 1 and consumed by both scanner scripts. Full field rules live i
 
 Field notes:
 
-- `ecosystem` — `npm` | `pypi` | `cargo` (lowercase).
-- `name` — exact package name including npm scope; the scanner normalizes case itself.
+- `ecosystem` — `npm` | `pypi` | `cargo` (lowercase); enforced at scan time — unknown values abort with exit 2 rather than silently skipping the ecosystem.
+- `name` — exact package name including npm scope; the scanner normalizes case itself, and PyPI names are matched with PEP 503 normalization (`-`, `_`, `.` interchangeable), so an IOC of `acme-lib` matches an installed `acme_lib`.
 - `versions` — every compromised version verbatim, **including pre-release tags** (missing one is the most common triage failure). An empty list `[]` means *any* installed version of that package is flagged (whole package malicious).
 - `file_paths` — malware drop locations; globs (`**`) and `~` supported.
 - `file_hashes` — `sha256 -> label` map (SHA-256 only), matched against files under `hash_scan_dirs` (kept tight — package caches — because hashing large trees is slow).
@@ -80,8 +80,8 @@ Field notes:
 
 | Script | Required | Optional |
 |---|---|---|
-| `scan_packages.py` | `--iocs FILE --roots DIR [DIR ...]` | `--max-depth N` (default 14), `--out FILE` |
-| `scan_host_iocs.py` | `--iocs FILE` | `--max-hash-mb N` (default 32; files larger are skipped when hashing), `--out FILE` |
+| `scan_packages.py` | `--iocs FILE --roots DIR [DIR ...]` | `--max-depth N` (default 14), `--out FILE`; exits **2** on invalid `iocs.json` |
+| `scan_host_iocs.py` | `--iocs FILE` | `--max-hash-mb N` (default 32; files larger are skipped when hashing), `--out FILE`; exits **2** on invalid `iocs.json` |
 | `run_scanners.sh` | `OUTDIR ROOT [ROOT ...]` | — (always exits 0; note in the report which tools were available) |
 
 ## Outputs
@@ -92,17 +92,40 @@ All JSON reports are printed to stdout **and** written to the `--out` path / `OU
 
 ```json
 {
-  "scanned_files": 142,
+  "schema_version": 2,
+  "alert_title": "Example npm Supply-Chain Compromise",
   "hit_count": 2,
   "hits": [
     {"ecosystem": "npm", "name": "@example/specs", "version": "6.11.2",
      "source": "/home/dev/proj-a/package-lock.json",
      "detail": "node_modules/@example/specs"}
-  ]
+  ],
+  "coverage": {
+    "confidence": "high",
+    "confidence_notes": [],
+    "roots_requested": ["/home/dev"],
+    "roots_walked": ["/home/dev"],
+    "roots_skipped": [],
+    "max_depth": 14,
+    "depth_pruned_dirs": 0,
+    "attempted_files": 142,
+    "read_errors": 0,
+    "scanned_files": 142,
+    "scanned_by_ecosystem": {"npm": 90, "pypi": 40, "cargo": 12},
+    "iocs": {"npm": {"packages": 4, "any_version": 0}}
+  }
 }
 ```
 
 Each hit names the exact `ecosystem / name / version`, the file it was found in (`source`), and where in that file (`detail`: lockfile path, dependency chain, or `installed in node_modules` / `installed (site-packages)`).
+
+The `coverage` block is the confidence control: `high` means every IOC
+ecosystem was actually exercised under valid roots with no meaningful read-error
+backlog; `check`/`none` comes with `confidence_notes` saying why (skipped root,
+zero manifests for an affected ecosystem, file parse errors, depth prunes).
+**Never report "clean" on `confidence: check` or `none`** — fix roots/IOCs and
+re-run. Top-level `scanned_files`/`hit_count`/`hits` are kept for backward
+compatibility.
 
 ### `host_report.json` — active-infection indicators
 
@@ -120,11 +143,25 @@ Each hit names the exact `ecosystem / name / version`, the file it was found in 
   "network_matches": [
     {"connection": "ESTAB 10.0.0.5:51234 203.0.113.7:443 users:(\"node\",pid=4711)", "indicator": "203.0.113.7"}
   ],
-  "total_host_iocs": 4
+  "persistence_matches": [
+    {"file": "/home/dev/.bashrc", "kind": "user-rc", "line_no": 42,
+     "matched_pattern": ".local/share/NodeJS/sync.js", "pattern_kind": "drop-path",
+     "line": "nohup node ~/.local/share/NodeJS/sync.js &"}
+  ],
+  "total_host_iocs": 4,
+  "total_persistence_matches": 1,
+  "ioc_warnings": []
 }
 ```
 
-Any hit here (dropped payload, matching hash, rogue process, or live connection to a C2 indicator) is treated as an **active-infection** signal, not mere exposure.
+Any hit in the first four classes (dropped payload, matching hash, rogue
+process, live C2 connection) is an **active-infection** signal, not mere
+exposure. `persistence_matches` is an inert grep of user/system cron, systemd
+units, autostart entries, and shell rc files for IOC paths/patterns — evidence
+the infection is **dormant or survives reboot**; treat with the same urgency,
+but confirm each match isn't a lookalike before reporting it. Persistence
+matches are counted separately (`total_persistence_matches`) and never inflate
+`total_host_iocs`.
 
 ### `scanout/` — raw scanner output
 
@@ -144,16 +181,26 @@ Plus a tailored remediation checklist from `references/remediation.md`, which al
 - **Required:** `python3` (stdlib only), Linux. Targeted at a Linux dev station; host-IOC checks use `ps`, and connection checks use `ss` (falling back to `netstat`).
 - **Optional:** `osv-scanner` (corroboration), `npm` (for `npm audit`), `ss`/`netstat`. Absent tools degrade gracefully and are noted in the report.
 
+## Tests
+
+Stdlib-only self-tests with synthetic fixture projects (no network, no real
+malware): `python3 -m unittest discover -s tests -v`. GitHub Actions
+(`.github/workflows/ci.yml`) runs them on every push/PR — run them before
+trusting any edit to the scanners.
+
 ## Files
 
 ```
 SKILL.md                      Agent entry point: triggers, workflow, judgment rules
 README.md                     This file
+LICENSE                       MIT
 references/alert_parsing.md   iocs.json schema + extraction rules (read in step 1)
 references/remediation.md     Evidence-level definitions + remediation checklist (read in step 5)
-scripts/scan_packages.py      npm/PyPI/Cargo lockfile + installed-package scanner
-scripts/scan_host_iocs.py     Drop-file, hash, process, and C2-connection checks
+scripts/scan_packages.py      npm/PyPI/Cargo lockfile + installed-package scanner (coverage/confidence report)
+scripts/scan_host_iocs.py     Drop-file, hash, process, C2-connection, and persistence checks
 scripts/run_scanners.sh       osv-scanner + npm audit corroboration wrapper
+tests/                        Fixture-based scanner self-tests (stdlib only)
+.github/workflows/ci.yml      CI: byte-compile + self-tests on push/PR
 ```
 
 ## Installation
@@ -168,3 +215,8 @@ For a pi agent: copy this directory (keeping its name, which must match the `nam
 - **AI tooling is a target** — the covered malware family includes a module that poisons AI dev assistants (Claude Code, Copilot, Cursor); on a host-IOC hit, agentic/dev-assistant config and MCP credentials are in the rotation scope.
 - The reference docs carry family-specific defaults (e.g. the `~/.local/share/NodeJS/sync.js` drop path, IPFS beacons) tuned to the Miasma/Shai-Hulud-style campaigns; for other campaigns, Step 1 must recover the real IOCs from the advisory.
 - The scripts read many files under `--roots`; on a broad `~/` sweep with large caches, keep `hash_scan_dirs` tight and `--max-hash-mb` at its default.
+- **A zero-hit report is only as good as its coverage** — check `coverage.confidence` and `scanned_by_ecosystem` before concluding clean; the tool tells you when it looked at nothing.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

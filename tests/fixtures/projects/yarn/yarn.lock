@@ -1,0 +1,5 @@
+# yarn lockfile v1
+
+"@acme/widgets@^2.0.0":
+  version "2.0.0"
+  resolved "https://registry.npmjs.org/@acme/widgets/-/widgets-2.0.0.tgz"
